@@ -128,34 +128,58 @@ int main (int argc, char *argv[]) {
         ofs.close();
     }
 	
-    // sending a non-sense message, you need to change this
-	filemsg fm(0, 0);
-	string fname = "teslkansdlkjflasjdf.dat";
+
+    if (!filename.empty()){	
+		filemsg fm(0, 0);
 	
-	int len = sizeof(filemsg) + (fname.size() + 1);
-	char* buf2 = new char[len];
-	memcpy(buf2, &fm, sizeof(filemsg));
-	strcpy(buf2 + sizeof(filemsg), fname.c_str());
-	chan.cwrite(buf2, len);  // I want the file length;
+		int len = sizeof(filemsg) + (filename.size() + 1);
+		char* buf2 = new char[len];
+		memcpy(buf2, &fm, sizeof(filemsg));
+		strcpy(buf2 + sizeof(filemsg), filename.c_str());
+		chan.cwrite(buf2, len);  // I want the file length;
 
-	int64_t filesize = 0;
-	chan.cread(&filesize, sizeof(int64_t));
+		int64_t filesize = 0;
+		chan.cread(&filesize, sizeof(int64_t));
 
-	char* buf3 = // create buffer of size buff capacity (m)
+		// open output file in directory
+		string outpath = "received/" + filename;
+    	ofstream outfile(outpath, ios::binary);
+    	if (!outfile.is_open()) {
+     	   cerr << "Could not open output file: " << outpath << endl;
+        	exit(1);
+    	}
 
-	// Loop over the segments in the file filesize / buff capacity
-	// create filemsg instance
-	filemsg* file_req = (filemsg*)buf2;
-	file_req->offset = // set offset in the file
-	file_freq->length = // set the length. Be careful of the last segment
-	// send the request (buf2)
-	chan.cwrite(buf2, len);
-	// receive the response
-	// cread into buf3 length file_req->len
-	// write buf3 into file: received/filename
+		char* buf3 = new char[m]; // create buffer of size buff capacity (m)
 
-	delete[] buf2;
-	delete[] buf3;
+		int64_t offset = 0;
+
+		// Loop over the segments in the file filesize / buff capacity
+		while (offset < filesize) {
+    		int64_t chunk = min((__int64_t)m, filesize - offset);
+
+			// create filemsg instance
+        	filemsg* file_req = (filemsg*)buf2;
+        	file_req->offset = offset;                 // set offset in the file
+        	file_req->length = chunk;                  // set the length. Be careful of the last segment
+
+			// send the request (buf2)
+			chan.cwrite(buf2, len);
+
+			// receive the response
+        	// cread into buf3 length file_req->len
+        	chan.cread(buf3, chunk);
+
+			// write buf3 into file: received/filename
+			outfile.write(buf3, chunk);
+
+        	offset += chunk;
+		}
+
+		outfile.close();
+
+		delete[] buf2;
+		delete[] buf3;
+	}
 
 	// If necessary, close and delete the new channel
 	if(new_chan)
