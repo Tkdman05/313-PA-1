@@ -12,19 +12,22 @@
 */
 #include "common.h"
 #include "FIFORequestChannel.h"
+#include <fstream>
 
 using namespace std;
 
 
 int main (int argc, char *argv[]) {
 	int opt;
-	int p = 1;
-	double t = 0.0;
-	int e = 1;
+	int p = -1;
+	double t = -1;
+	int e = -1;
 	int m = MAX_MESSAGE;
+	bool new_chan = false;
+	vector<FIFORequestChannel*> channels;
 	
 	string filename = "";
-	while ((opt = getopt(argc, argv, "p:t:e:f:m:")) != -1) {
+	while ((opt = getopt(argc, argv, "p:t:e:f:m:c")) != -1) {
 		switch (opt) {
 			case 'p':
 				p = atoi (optarg);
@@ -41,26 +44,89 @@ int main (int argc, char *argv[]) {
 			case 'm':
 				m = atoi(optarg);
 				break;
+			case 'c':
+				new_chan = true;
+				break;
 		}
 	}
 
-	// TODO
-	// give arguments for the srever
-	// server needs './server', '-m', '<val for -m arg>', 'NULL'
 	// fork
-	// In the child, run execvp using the server arguments.
+	pid_t pid = fork();
+	if (pid == 0) {
+    	// give arguments for the srever
+		// server needs './server', '-m', '<val for -m arg>', 'NULL'
+    	char* args[5];
+    	args[0] = (char*)"./server";
+    	args[1] = (char*)"-m";
+    	string m_str = to_string(m);
+    	args[2] = (char*)m_str.c_str();
+    	args[3] = NULL;
 
-    FIFORequestChannel chan("control", FIFORequestChannel::CLIENT_SIDE);
+		// In the child, run execvp using the server arguments.
+    	execvp(args[0], args);
+    	perror("execvp failed");
+    	exit(1);
+	}
+	else if (pid < 0) {
+    	perror("fork failed");
+    	exit(1);
+	}
+
+    FIFORequestChannel cont_chan("control", FIFORequestChannel::CLIENT_SIDE);
+	channels.push_back(&cont_chan);
+
+	if (new_chan) {
+		// send newchannel request to the server;
+		MESSAGE_TYPE nc = NEWCHANNEL_MSG;
+    	cont_chan.cwrite(&nc, sizeof(MESSAGE_TYPE));
+		// create a variable to hold the name
+		// cread the response from the server
+		// call the FIFORequestChannel constructor with the name from the server
+		// Push the new channel into the vector
+	}
+
+	FIFORequestChannel chan = *(channels.back());
 	
-	// example data point request
-    char buf[MAX_MESSAGE]; // 256
-    datamsg x(1, 0.0, 1); // change from hardcoding to user's values
+	// Single datapoint, only run p.t.e != -1
+	if (p != -1 && t != -1 && e != -1) {
+    	char buf[MAX_MESSAGE]; // 256
+    	datamsg x(p, t, e); // user's values
 	
-	memcpy(buf, &x, sizeof(datamsg));
-	chan.cwrite(buf, sizeof(datamsg)); // question
-	double reply;
-	chan.cread(&reply, sizeof(double)); //answer
-	cout << "For person " << p << ", at time " << t << ", the value of ecg " << e << " is " << reply << endl;
+		memcpy(buf, &x, sizeof(datamsg));
+		chan.cwrite(buf, sizeof(datamsg)); // question
+		double reply;
+		chan.cread(&reply, sizeof(double)); //answer
+		cout << "For person " << p << ", at time " << t << ", the value of ecg " << e << " is " << reply << endl;
+	}
+
+	// Else, if p != -1, request 1000 datapoints.
+	else if (p != -1){
+		ofstream ofs("received/x1.csv");
+		if (!ofs.is_open()) {
+			cerr << "x1 cannot be oppened" << endl;
+			exit(1);
+		}
+		// loop over 1st 1000 lines
+		for (int i = 0; i < 1000; i++) {
+			double time = i * 0.004;
+
+			// send request for ecg 1
+			datamsg req1(p, time, 1);
+            chan.cwrite(&req1, sizeof(datamsg));
+            double ecg1;
+            chan.cread(&ecg1, sizeof(double));
+
+			// send request for ecq 2
+			datamsg req2(p, time, 2);
+            chan.cwrite(&req2, sizeof(datamsg));
+            double ecg2;
+            chan.cread(&ecg2, sizeof(double));
+
+			// write line to recieved/x1.csv
+			ofs << time << "," << ecg1 << "," << ecg2 << "\n";
+		}
+        ofs.close();
+    }
 	
     // sending a non-sense message, you need to change this
 	filemsg fm(0, 0);
@@ -72,9 +138,32 @@ int main (int argc, char *argv[]) {
 	strcpy(buf2 + sizeof(filemsg), fname.c_str());
 	chan.cwrite(buf2, len);  // I want the file length;
 
+	int64_t filesize = 0;
+	chan.cread(&filesize, sizeof(int64_t));
+
+	char* buf3 = // create buffer of size buff capacity (m)
+
+	// Loop over the segments in the file filesize / buff capacity
+	// create filemsg instance
+	filemsg* file_req = (filemsg*)buf2;
+	file_req->offset = // set offset in the file
+	file_freq->length = // set the length. Be careful of the last segment
+	// send the request (buf2)
+	chan.cwrite(buf2, len);
+	// receive the response
+	// cread into buf3 length file_req->len
+	// write buf3 into file: received/filename
+
 	delete[] buf2;
+	delete[] buf3;
+
+	// If necessary, close and delete the new channel
+	if(new_chan)
+	{
+		// do your close and deletes
+	}
 	
 	// closing the channel    
-    MESSAGE_TYPE m = QUIT_MSG;
-    chan.cwrite(&m, sizeof(MESSAGE_TYPE));
+    MESSAGE_TYPE mes = QUIT_MSG;
+    chan.cwrite(&mes, sizeof(MESSAGE_TYPE));
 }
